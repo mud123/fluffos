@@ -1837,7 +1837,7 @@ void f_query_ip_port(void) {
  ** mud time or GMT, and this isn't always correct.
  */
 
-#ifdef F_ZONETIME
+#if defined F_ZONETIME || defined F_IS_DAYLIGHT_SAVINGS_TIME
 
 char *set_timezone(const char *timezone) {
   static char put_tz[80];
@@ -1865,6 +1865,10 @@ void reset_timezone(const char *old_tz) {
 
   tzset();
 }
+
+#endif
+
+#ifdef F_ZONETIME
 
 void f_zonetime(void) {
   const char *timezone, *old_tz;
@@ -2071,7 +2075,6 @@ static int memory_share(svalue_t *sv) {
  *
  * map["program name"]["variable name"] = memory usage
  */
-#ifdef F_MEMORY_SUMMARY
 static void fms_recurse(mapping_t *map, object_t *ob, int *idx, program_t *prog) {
   int i;
   svalue_t *entry;
@@ -2117,7 +2120,6 @@ void f_memory_summary(void) {
   }
   push_refed_mapping(result);
 }
-#endif
 
 #endif
 
@@ -2251,6 +2253,7 @@ void event(svalue_t *event_ob, const char *event_fun, int numparam, svalue_t *ev
 
     apply(name, event_ob->u.ob, numparam + 1, ORIGIN_EFUN);
 
+#ifndef NO_ENVIRONMENT
     /* And then call it on it's inventory..., if it's still around! */
     if (event_ob && event_ob->u.ob && !(event_ob->u.ob->flags & O_DESTRUCTED)) {
       for (ob = event_ob->u.ob->contains; ob; ob = ob->next_inv) {
@@ -2279,6 +2282,8 @@ void event(svalue_t *event_ob, const char *event_fun, int numparam, svalue_t *ev
         apply(name, ob, numparam + 1, ORIGIN_EFUN);
       }
     }
+#endif
+
   }
   sp--;
   FREE_MSTR(name);
@@ -2427,12 +2432,15 @@ void f_base_name(void) {
 
 #ifdef F_GET_GARBAGE
 int garbage_check(object_t *ob, void *data) {
-  return (ob->ref == 1) && (ob->flags & O_CLONE) &&
-         !(ob->super
-#ifndef NO_SHADOWS
-           || ob->shadowing
+  return (ob->ref == 1) && (ob->flags & O_CLONE)
+#if defined NO_ENVIRONMENT && !defined NO_SHADOWS
+      && !ob->shadowing
+#elif !defined NO_ENVIRONMENT && defined NO_SHADOWS
+      && !ob->super
+#elif !defined NO_ENVIRONMENT && !defined NO_SHADOWS
+      && !(ob->super || ob->shadowing)
 #endif
-           );
+      ;
 }
 
 void f_get_garbage(void) {
