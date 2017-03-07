@@ -194,7 +194,7 @@ void new_user_handler(evconnlistener *listener, evutil_socket_t fd, struct socka
   user->last_time = get_current_time();
 
 #ifdef USE_ICONV
-  user->trans = get_translator("UTF-8");
+  user->trans = get_translator(USE_ICONV);
 #else
   user->trans = (struct translation *)master_ob;
 // never actually used, but avoids multiple ifdefs later on!
@@ -267,7 +267,7 @@ void new_user_handler(evconnlistener *listener, evutil_socket_t fd, struct socka
   query_name_by_addr(ob);
 
   if (user->connection_type == PORT_TELNET) {
-    send_initial_telent_negotiantions(user);
+    send_initial_telnet_negotiations(user);
   }
 
   set_command_giver(ob);
@@ -615,6 +615,12 @@ void get_user_data(interactive_t *ip) {
           ip->text_end -= ip->text_start;
           ip->text_start = 0;
         }
+        if (text_space < MAX_TEXT / 16){
+          ip->iflags |= SKIP_COMMAND;
+          ip->text_start = ip->text_end = 0;
+          text_space = MAX_TEXT;
+        }
+        
       }
       break;
 
@@ -1612,7 +1618,7 @@ void f_websocket_handshake_done() {
   }
   auto ip = current_interactive->interactive;
   ip->iflags |= HANDSHAKE_COMPLETE;
-  send_initial_telent_negotiantions(ip);
+  send_initial_telnet_negotiations(ip);
 }
 #endif
 

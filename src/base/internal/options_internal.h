@@ -54,7 +54,7 @@
  *
  * A side effect is that 'array' cannot be a variable or function name.
  */
-#undef ARRAY_RESERVED_WORD
+#define ARRAY_RESERVED_WORD
 
 /* REF_RESERVED_WORD: If this is defined then the word 'ref' can be
  *   used to pass arguments to functions by value.  Example:
@@ -95,7 +95,7 @@
  * config file.
  */
 /* MAX_LOCAL: maximum number of local variables allowed per LPC function */
-#define CFG_MAX_LOCAL_VARIABLES 50
+#define CFG_MAX_LOCAL_VARIABLES 100
 
 /* CFG_MAX_GLOBAL_VARIABLES: This value determines the maximum number of
  *   global variables per object.  The maximum value is 65536.  There is
@@ -137,6 +137,6 @@
  *   resolution is 1/60 of a second, then any time less than approxmately 15k
  *   microseconds will resolve to zero (0).
  */
-#undef PROFILE_FUNCTIONS
+#define PROFILE_FUNCTIONS
 
 #endif /* _BASE_INTERNAL_OPTIONS_INTERNAL_H */

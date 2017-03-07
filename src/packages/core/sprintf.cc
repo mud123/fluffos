@@ -519,7 +519,7 @@ static void add_nstr(const char *str, int len) {
  */
 static void add_justified(const char *str, int slen, pad_info_t *pad, int fs, format_info finfo,
                           short int trailing) {
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
   int skip = 0;
   int wide = 0;
   const char *p2 = str + slen;
@@ -550,7 +550,7 @@ static void add_justified(const char *str, int slen, pad_info_t *pad, int fs, fo
     }
   }
 
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
   while (p2 > str) {
     if ((*p2) & 0x80) {
       wide = 1;
@@ -621,7 +621,7 @@ static int add_column(cst **column, int trailing) {
   const char *col_d = col->d.col; /* always holds (col->d.col) */
 
   done = 0;
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
   int width = 0;
 #endif
   /* find a good spot to break the line */
@@ -629,7 +629,7 @@ static int add_column(cst **column, int trailing) {
     if (c == ' ') {
       space = done;
     }
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
     if (c & 0x80) {
       if (!(col_d[done + 1] & 0x80)) {
         width++;
@@ -688,17 +688,17 @@ static int add_table(cst **table) {
   tab_data_t *tab_d = tab->d.tab; /* always tab->d.tab */
   const char *tab_di;             /* always tab->d.tab[i].cur */
   int end;
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
   int width, tabwidth;
 #endif
 
   for (i = 0; i < tab->nocols && (tab_di = tab_d[i].cur); i++) {
     end = tab_d[i + 1].start - tab_di - 1;
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
     width = 0;
 #endif
     for (done = 0; done != end && tab_di[done] != '\n'; done++)
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
     {
       if (tab_di[done] & 0x80) {
         if (!(tab_di[done + 1] & 0x80)) {
@@ -755,7 +755,7 @@ static int get_curpos() {
   }
   p1 = sprintf_state->obuff.buffer + sprintf_state->obuff.real_size - 1;
   p2 = p1;
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
   int skip = 0;
   int wide = 0;
   while (p2 > sprintf_state->obuff.buffer && *p2 != '\n') {
@@ -1232,7 +1232,7 @@ char *string_print_formatted(const char *format_str, int argc, svalue_t *argv) {
             }
           } else {                             /* not column or table */
             const char *tmp = carg->u.string;  // work around tcc bug;
-#ifdef USE_ICONV
+#ifdef USE_ICONV_UTF8
             int width = 0;
             int i;
             if (pres) {
