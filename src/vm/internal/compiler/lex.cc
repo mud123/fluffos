@@ -16,6 +16,9 @@
 #include "base/std.h"
 
 #include "vm/internal/compiler/lex.h"
+#include "vm/internal/base/array.h"
+#include "vm/internal/base/interpret.h"
+#include "vm/internal/master.h"
 
 #include <cstdio>    // for EOF
 #include <fcntl.h>   // for O_RDONLY etc
@@ -81,8 +84,10 @@ lpc_predef_t *lpc_predefs = NULL;
 
 static int yyin_desc;
 int lex_fatal;
-static char **inc_list;
+static char **inc_list;         // global include path from runtime config
 static int inc_list_size;
+static char **inc_path;         // include path used for current compile
+static int inc_path_size;
 static int defines_need_freed = 0;
 static char *last_nl;
 static int nexpands = 0;
@@ -254,7 +259,6 @@ static void refill_buffer(void);
 static int exgetc(void);
 static int old_func(void);
 static ident_hash_elem_t *quick_alloc_ident_entry(void);
-static void yyerrorp(const char * /*s*/);
 
 #define LEXER
 
@@ -394,7 +398,7 @@ static void handle_elif()
       skip_to("endif", (char *)0);
     }
   } else {
-    yyerrorp("Unexpected %celif");
+    lexerror("Unexpected #elif");
   }
 }
 
@@ -406,7 +410,7 @@ static void handle_else(void) {
       skip_to("endif", (char *)0);
     }
   } else {
-    yyerrorp("Unexpected %cendif");
+    lexerror("Unexpected #endif");
   }
 }
 
@@ -417,7 +421,7 @@ static void handle_endif(void) {
     iftop = p->next;
     FREE((char *)p);
   } else {
-    yyerrorp("Unexpected %cendif");
+    lexerror("Unexpected #endif");
   }
 }
 
@@ -485,12 +489,12 @@ static LPC_INT cond_get_exp(int priority) {
     }
 #else
     if ((c = exgetc()) != ')') {
-      yyerrorp("bracket not paired in %cif");
+      lexerror("bracket not paired in #if");
     }
 #endif
   } else if (ispunct(c)) {
     if (!(x = optab1[c])) {
-      yyerrorp("illegal character in %cif");
+      lexerror("illegal character in #if");
       return 0;
     }
     value = cond_get_exp(12);
@@ -508,7 +512,7 @@ static LPC_INT cond_get_exp(int priority) {
         // nothing
         break;
       default:
-        yyerrorp("illegal unary operator in %cif");
+        lexerror("illegal unary operator in #if");
     }
   } else {
     int base;
@@ -519,9 +523,9 @@ static LPC_INT cond_get_exp(int priority) {
 #else
       if (c == '\n') {
 #endif
-        yyerrorp("missing expression in %cif");
+        lexerror("missing expression in #if");
       } else {
-        yyerrorp("illegal character in %cif");
+        lexerror("illegal character in #if");
       }
       return 0;
     }
@@ -577,7 +581,7 @@ static LPC_INT cond_get_exp(int priority) {
       if (!optab2[x]) {
         outp--;
         if (!optab2[x + 1]) {
-          yyerrorp("illegal operator use in %cif");
+          lexerror("illegal operator use in #if");
           return 0;
         }
         break;
@@ -601,14 +605,14 @@ static LPC_INT cond_get_exp(int priority) {
         if (value2) {
           value /= value2;
         } else {
-          yyerrorp("division by 0 in %cif");
+          lexerror("division by 0 in #if");
         }
         break;
       case MOD:
         if (value2) {
           value %= value2;
         } else {
-          yyerrorp("modulo by 0 in %cif");
+          lexerror("modulo by 0 in #if");
         }
         break;
       case BPLUS:
@@ -668,7 +672,7 @@ static LPC_INT cond_get_exp(int priority) {
         }
 #else
         if ((c = exgetc()) != ':') {
-          yyerrorp("'?' without ':' in %cif");
+          lexerror("'?' without ':' in #if");
         }
 #endif
         if (value) {
@@ -768,13 +772,6 @@ static void merge(char *name, char *dest) {
   }
 }
 
-static void yyerrorp(const char *s) {
-  char buf[200];
-  sprintf(buf, s, '#');
-  yyerror(buf);
-  lex_fatal++;
-}
-
 static void lexerror(const char *s) {
   yyerror(s);
   lex_fatal++;
@@ -841,10 +838,85 @@ static int skip_to(const char *token, const char *atoken) {
   }
 }
 
+void init_include_path() {
+  push_malloced_string(add_slash(current_file));        // does master has an include path?
+  svalue_t *ret = apply_master_ob(APPLY_GET_INCLUDE_PATH, 1);
+
+  if (!ret || ret == (svalue_t *)-1) {                  // either no or no master yet
+      return;                                           // just use the runtime configuration
+  }
+  if (ret->type != T_ARRAY) {                           // illegal return value
+      debug_message("'master::get_include_path' must return 'string *'\n");
+      return;                                           // we still have the runtime configuration
+  }
+  array_t *arr  = ret->u.arr;
+  int size = arr->size;
+
+  if(!size) {                                           // empty path?
+      debug_message("got empty include path for 'master::get_include_path(%s)'\n", current_file);
+      return;                                           // we still have the runtime configuration
+  }
+  char **path = static_cast<char **>(DMALLOC(sizeof(char*) * size, TAG_COMPILER, "compiler:init_include_path"));
+
+  // check elements and build working copy
+  int i,                    // index into returned array
+      j,                    // index into dynamic path array
+      k;                    // index into static path array
+  for (i = j = 0; i < arr->size; i++) {                 // can't use size since it might change
+    if (arr->item[i].type != T_STRING) {                // wrong type of element
+      debug_message("'master::get_include_path(%s)' must return 'string *'\n", current_file);
+      goto init_include_path_cleanup;                   // clean exit
+    }
+
+    const char *elem;
+    if(!strcmp(elem = arr->item[i].u.string, ":DEFAULT:")) { // replace with runtime configuration
+      size += inc_list_size - 1;                        // get additional space
+      path = static_cast<char **>(DREALLOC(path, sizeof(char *) * size, TAG_COMPILER, "compiler:init_include_path"));
+      for (k = 0; k < inc_list_size;) {                 // and copy runtime configuration
+        path[j++] = make_shared_string(inc_list[k++]);
+      }
+    } else {
+      const char *check = elem;
+      if (elem[0] == '/') {
+        check = &elem[1];
+      }
+      if (!legal_path(check)) {                     // illegal value
+        debug_message("'master::get_include_path(%s)' returns invalid value '%s', must give paths without any '..'\n", current_file, elem);
+        goto init_include_path_cleanup;                   // clean exit
+      } else {
+        path[j++] = make_shared_string(elem);             // valid directory
+      }
+    }
+  }
+  inc_path = path;                                      // with this we may continue
+  inc_path_size = size;
+  return;
+
+init_include_path_cleanup:                              // oops, here something went wrong...
+  if (j) {                                              // we have seen at least one valid string
+    for (i = 0; i < j; i++) {
+      free_string(path[i]);                             // free all of them
+    }
+  }
+  FREE(path);                                           // free array
+}
+
+void deinit_include_path() {
+  if (inc_path != inc_list) {                           // we got an include path from master
+    for (int i = 0; i < inc_path_size; i++) {
+      free_string(inc_path[i]);                         // free it
+    }
+    FREE(inc_path);
+    inc_path = inc_list;
+    inc_path_size = inc_list_size;
+  }
+}
+
 static int inc_open(char *buf, char *name, int check_local) {
   int i, f;
   char *p;
   const char *tmp;
+
   if (check_local) {
     merge(name, buf);
     tmp = check_valid_path(buf, master_ob, "include", 0);
@@ -860,8 +932,8 @@ static int inc_open(char *buf, char *name, int check_local) {
       return -1;
     }
   }
-  for (i = 0; i < inc_list_size; i++) {
-    sprintf(buf, "%s/%s", inc_list[i], name);
+  for (i = 0; i < inc_path_size; i++) {
+    sprintf(buf, "%s/%s", inc_path[i], name);
     tmp = check_valid_path(buf, master_ob, "include", 0);
     if (tmp && (f = open(tmp, O_RDONLY)) != -1) {
       return f;
@@ -2793,7 +2865,7 @@ void add_predefines() {
   add_quoted_predefine("__CXXFLAGS__", CXXFLAGS);
   add_quoted_predefine("__OPTIMIZATION__", OPTIMIZE);
 
-/* Backwards Compat */
+  /* Backwards Compat */
   add_quoted_predefine("MUD_NAME", CONFIG_STR(__MUD_NAME__));
 #ifdef F_ED
   add_predefine("HAS_ED", -1, "");
@@ -3846,8 +3918,8 @@ void set_inc_list(char *list) {
     size++;
     p++;
   }
-  inc_list = reinterpret_cast<char **>(DCALLOC(size, sizeof(char *), TAG_INC_LIST, "set_inc_list"));
-  inc_list_size = size;
+  inc_path = inc_list = reinterpret_cast<char **>(DCALLOC(size, sizeof(char *), TAG_INC_LIST, "set_inc_list"));
+  inc_path_size = inc_list_size = size;
   for (i = size - 1; i >= 0; i--) {
     p = strrchr(list, ':');
     if (p) {

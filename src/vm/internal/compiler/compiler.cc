@@ -2316,6 +2316,8 @@ static program_t *epilog(void) {
   program_t *prog;
   compiler_temp_t *fundefp, *nextdefp;
 
+  deinit_include_path();
+
   if (num_parse_error > 0 || inherit_file) {
     /* don't print these; they can be wrong, since we didn't parse the
        entire file */
@@ -2526,6 +2528,8 @@ static program_t *epilog(void) {
     prog->inherit = 0;
   }
 
+  prog->apply_lookup_table = nullptr;
+
 #ifdef DEBUG
   if (p - reinterpret_cast<char *>(prog) != size) {
     debug_message("Program size miscalculated for /%s.\n", prog->filename);
@@ -2604,6 +2608,8 @@ static void prolog(int f, char *name) {
 
   current_file = make_shared_string(name);
   current_file_id = add_program_file(name, 1);
+
+  init_include_path();
 
   /*
    * if we've got a simul_efun object and we're not reloading it, make a copy

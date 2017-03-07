@@ -694,7 +694,6 @@ void check_all_blocks(int flag) {
     mark_command_giver_stack();
     mark_call_outs();
     mark_simuls();
-    mark_apply_low_cache();
     mark_mapping_node_blocks();
     mark_config();
 
@@ -923,7 +922,10 @@ void check_all_blocks(int flag) {
                         entry->tag);
             break;
           case TAG_UID:
+              // not sure this is still relevant with the change in data structure
+              /*
             outbuf_addv(&out, "WARNING: Found orphan uid node: %s %04x\n", entry->desc, entry->tag);
+            */
             break;
           case TAG_SENTENCE:
             sent = NODET_TO_PTR(entry, sentence_t *);

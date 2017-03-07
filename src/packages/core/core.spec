@@ -366,9 +366,9 @@ mapping *function_profile(object default:F__THIS_OBJECT);
 
 int resolve(string, string | function);
 #ifdef USE_ICONV
-int set_encoding(string);
-string to_utf8(string, string);
-string utf8_to(string, string);
+int set_encoding(string, void | object);
+string to_default_encoding(string, string);
+string default_encoding_to(string, string);
 int *str_to_arr(string);
 string arr_to_str(int *);
 #endif
